@@ -12,6 +12,11 @@ import org.apache.http.util.EntityUtils;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -39,32 +44,46 @@ public class Voter {
             }
         }
 
-        HttpPost post = new HttpPost(VOTE_URL);
-        CloseableHttpResponse response = null;
-        for (int i = 0; i < max; i++) {
-            try {
-                post.setEntity(buildEntity());
-                response = httpClient.execute(post);
-                switch (response.getStatusLine().getStatusCode()) {
-                    case 200:
-                        System.out.println("OK");
-                        break;
+        final AtomicInteger count = new AtomicInteger(0);
+        final int MAX_COUNT = max;
+        ExecutorService executorService = new ThreadPoolExecutor(10, 50, 0, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<Runnable>(200),
+                new ThreadPoolExecutor.CallerRunsPolicy());
 
-                    default:
-                        System.err.println("Yuck!");
-                        break;
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            } finally {
-                if (null != response) {
+        while (count.intValue() < max) {
+            executorService.submit(new Runnable() {
+                public void run() {
+                    if (count.intValue() > MAX_COUNT) {
+                        return;
+                    }
+                    HttpPost post = new HttpPost(VOTE_URL);
+                    CloseableHttpResponse response = null;
                     try {
-                        response.close();
+                        post.setEntity(buildEntity());
+                        response = httpClient.execute(post);
+                        switch (response.getStatusLine().getStatusCode()) {
+                            case 200:
+                                System.out.println("OK");
+                                count.incrementAndGet();
+                                break;
+
+                            default:
+                                System.err.println("Yuck!");
+                                break;
+                        }
                     } catch (IOException e) {
                         e.printStackTrace();
+                    } finally {
+                        if (null != response) {
+                            try {
+                                response.close();
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }
                     }
                 }
-            }
+            });
         }
     }
 
