@@ -21,17 +21,27 @@ public class Voter {
 
     private static final String SIGN_URL = "http://adonotify.meirixue.com/jinpai/wap/index2.php?no=2296&from=groupmessage&isappinstalled=0";
 
+    private static Pattern TIME_PATTERN = Pattern.compile("var timesp = \\'(\\d{10})\\'");
+
     //var sign = '70c140f9bdd95e11312c995c663708a8';
     private static Pattern PATTERN = Pattern.compile("var sign = \\'(\\w{32})\\'");
 
     private static CloseableHttpClient httpClient = HttpClients.createDefault();
     public static void main(String[] args) {
 
+        int max = 10000;
+
+        if (args.length == 1) {
+            try {
+                max = Integer.parseInt(args[0]);
+            } catch (NumberFormatException e) {
+                System.out.println("You need to specify an optional integer as argument");
+            }
+        }
+
         HttpPost post = new HttpPost(VOTE_URL);
-
         CloseableHttpResponse response = null;
-
-        for (int i = 0; i < 1000; i++) {
+        for (int i = 0; i < max; i++) {
             try {
                 post.setEntity(buildEntity());
                 response = httpClient.execute(post);
@@ -41,7 +51,7 @@ public class Voter {
                         break;
 
                     default:
-                        System.out.println("Yuck!");
+                        System.err.println("Yuck!");
                         break;
                 }
             } catch (IOException e) {
@@ -61,22 +71,28 @@ public class Voter {
     public static UrlEncodedFormEntity buildEntity() throws IOException {
         List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>();
         nameValuePairs.add(new BasicNameValuePair("ids", "2296"));
-        nameValuePairs.add(new BasicNameValuePair("timesp", String.valueOf(System.currentTimeMillis() / 1000)));
-        nameValuePairs.add(new BasicNameValuePair("sign", getSign()));
+        String[] data = getData();
+        if (null == data) {
+            throw new IOException("Unable to get timesp and sign");
+        }
+        nameValuePairs.add(new BasicNameValuePair("timesp", data[0]));
+        nameValuePairs.add(new BasicNameValuePair("sign", data[1]));
         return new UrlEncodedFormEntity(nameValuePairs, Consts.UTF_8);
     }
 
-
-    private static String getSign() throws IOException {
+    private static String[] getData() throws IOException {
         HttpGet get = new HttpGet(SIGN_URL);
         CloseableHttpResponse response = httpClient.execute(get);
         if (response.getStatusLine().getStatusCode() == 200) {
             String html = EntityUtils.toString(response.getEntity());
-            Matcher matcher = PATTERN.matcher(html);
-            if (matcher.find()) {
-                String sign = matcher.group(1);
-                System.out.println(sign);
-                return sign;
+            String[] result = new String[2];
+            Matcher timeMatcher = TIME_PATTERN.matcher(html);
+            Matcher signMatcher = PATTERN.matcher(html);
+
+            if (timeMatcher.find() && signMatcher.find()) {
+                result[0] = timeMatcher.group(1);
+                result[1] = signMatcher.group(1);
+                return result;
             }
         }
         return null;
