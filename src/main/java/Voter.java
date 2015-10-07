@@ -1,10 +1,14 @@
 import com.alibaba.fastjson.JSON;
+import javafx.util.Pair;
 import org.apache.http.Consts;
+import org.apache.http.HttpHost;
 import org.apache.http.NameValuePair;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.protocol.HttpClientContext;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.message.BasicHeader;
@@ -58,6 +62,12 @@ public class Voter {
 
     private static CloseableHttpClient httpClient = HttpClients.createDefault();
 
+    private static volatile boolean switchingProxy = false;
+
+    private static volatile String currentIP = null;
+
+    private static volatile int currentPort = -1;
+
     public static void main(String[] args) {
         launchVote(args);
     }
@@ -75,53 +85,84 @@ public class Voter {
 
         final AtomicInteger count = new AtomicInteger(0);
         final int MAX_COUNT = max;
+
         ExecutorService executorService = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
                 new LinkedBlockingQueue<Runnable>(1),
                 new ThreadPoolExecutor.CallerRunsPolicy());
 
         while (count.intValue() < max) {
-            executorService.submit(new Runnable() {
-                public void run() {
-                    if (count.intValue() > MAX_COUNT) {
-                        return;
-                    }
-                    HttpPost post = new HttpPost(VOTE_URL);
-                    post.setHeader(new BasicHeader("User-Agent", USER_AGENTS[count.intValue() % USER_AGENTS.length]));
-                    CloseableHttpResponse response = null;
-                    try {
-                        post.setEntity(buildEntity());
-                        response = httpClient.execute(post);
-                        switch (response.getStatusLine().getStatusCode()) {
-                            case 200:
-                                System.out.println("OK");
-                                count.incrementAndGet();
-                                String responseText = EntityUtils.toString(response.getEntity(), Charset.forName("UTF-8"));
-                                ResponseText responseTextObject = JSON.parseObject(responseText, ResponseText.class);
-                                System.out.println(responseTextObject.getMsg());
-                                if (responseTextObject.getMsg().contains("投票超限")) {
-                                    System.exit(1);
-                                }
-                                break;
-
-                            default:
-                                System.err.println("Yuck!");
-                                break;
+            if (count.intValue() > MAX_COUNT) {
+                return;
+            }
+            HttpPost post = new HttpPost(VOTE_URL);
+            post.setHeader(new BasicHeader("User-Agent", USER_AGENTS[count.intValue() % USER_AGENTS.length]));
+            CloseableHttpResponse response = null;
+            try {
+                post.setEntity(buildEntity());
+                response = httpClient.execute(post, buildContext());
+                switch (response.getStatusLine().getStatusCode()) {
+                    case 200:
+                        String responseText = EntityUtils.toString(response.getEntity(), Charset.forName("UTF-8"));
+                        ResponseText responseTextObject = JSON.parseObject(responseText, ResponseText.class);
+                        System.out.println(responseTextObject.getMsg());
+                        switchingProxy = responseTextObject.getMsg().contains("投票超限");
+                        if (!switchingProxy) {
+                            count.incrementAndGet();
+                            System.out.println("Vote Success!");
+                        } else {
+                            System.out.println("Blocked!");
+                            System.out.println("Need to switch proxy...");
                         }
+                        break;
+
+                    default:
+                        System.err.println("Yuck!" + " Response Status: " + response.getStatusLine());
+                        switchingProxy = true;
+                        break;
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+                switchingProxy = true;
+            } finally {
+                if (null != response) {
+                    try {
+                        response.close();
                     } catch (IOException e) {
                         e.printStackTrace();
-                    } finally {
-                        if (null != response) {
-                            try {
-                                response.close();
-                            } catch (IOException e) {
-                                e.printStackTrace();
-                            }
-                        }
                     }
                 }
-            });
+            }
         }
     }
+
+    private static synchronized HttpClientContext buildContext() {
+        HttpClientContext context = HttpClientContext.create();
+        if (switchingProxy || null == currentIP || -1 == currentPort) {
+            if (null != currentIP && -1 != currentPort) {
+                System.out.println("Marking " + currentIP + ":" + currentPort + " as used.");
+                ProxyGrabber.markProxyUsed(currentIP, currentPort);
+                System.out.println("Marked!");
+            }
+
+            Pair<String, Integer> pair = ProxyGrabber.getProxyFromDB();
+
+            if (null == pair) {
+                throw new RuntimeException("Unable to fetch working proxy!");
+            }
+
+            currentIP = pair.getKey();
+            currentPort = pair.getValue();
+            switchingProxy = false;
+            System.out.println("Current Proxy being used is: " + currentIP + ":" + currentPort);
+        }
+        RequestConfig requestConfig = RequestConfig.custom()
+                .setProxy(new HttpHost(currentIP, currentPort)).build();
+        context.setRequestConfig(requestConfig);
+        return context;
+    }
+
+
+
 
     public static UrlEncodedFormEntity buildEntity() throws IOException {
         List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>();
@@ -147,7 +188,6 @@ public class Voter {
             if (timeMatcher.find() && signMatcher.find()) {
                 result[0] = timeMatcher.group(1);
                 result[1] = signMatcher.group(1);
-                System.out.println("TimeSP:" + result[0] + ", sign: " + result[1]);
                 return result;
             }
         }
