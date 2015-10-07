@@ -139,7 +139,7 @@ public class ProxyGrabber {
         }
     }
 
-    private static Connection getConnection() {
+    public static Connection getConnection() {
         if (null == connection) {
             try {
                 Class.forName("com.mysql.jdbc.Driver");
