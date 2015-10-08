@@ -67,9 +67,11 @@ public class ProxyGrabber {
 
     private static Connection connection;
 
-    private static final String SQL_GET_PROXY = "SELECT ip, port FROM proxy WHERE status = 0 LIMIT 0, 1";
+    private static final String SQL_GET_PROXY = "SELECT ip, port FROM proxy WHERE status = 0 AND active IS TRUE LIMIT 0, 1";
 
     private static final String SQL_MARK_PROXY_USED = "UPDATE proxy SET status = 1 WHERE ip = ? AND port = ?";
+
+    private static final String SQL_MARK_PROXY_INACTIVE = "UPDATE proxy SET active = false WHERE ip = ? AND port = ?";
 
 
     public static Pair<String, Integer> getProxyFromDB() {
@@ -94,6 +96,21 @@ public class ProxyGrabber {
         PreparedStatement preparedStatement = null;
         try {
             preparedStatement = connection.prepareStatement(SQL_MARK_PROXY_USED);
+            preparedStatement.setString(1, ip);
+            preparedStatement.setInt(2, port);
+            preparedStatement.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        } finally {
+            close(preparedStatement);
+        }
+    }
+
+    public static void markProxyInactive(String ip, int port) {
+        Connection connection = getConnection();
+        PreparedStatement preparedStatement = null;
+        try {
+            preparedStatement = connection.prepareStatement(SQL_MARK_PROXY_INACTIVE);
             preparedStatement.setString(1, ip);
             preparedStatement.setInt(2, port);
             preparedStatement.executeUpdate();

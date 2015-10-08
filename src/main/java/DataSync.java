@@ -22,7 +22,13 @@ public class DataSync {
             preparedStatement.setString(1, resultSet.getString("ip"));
             preparedStatement.setInt(2, resultSet.getInt("port"));
             preparedStatement.setInt(3, resultSet.getInt("status"));
-            preparedStatement.addBatch();
+
+            try {
+                preparedStatement.executeUpdate();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+
         }
         preparedStatement.executeBatch();
 

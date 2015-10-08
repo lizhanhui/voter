@@ -9,6 +9,8 @@ import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.protocol.HttpClientContext;
+import org.apache.http.conn.ConnectTimeoutException;
+import org.apache.http.conn.HttpHostConnectException;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.message.BasicHeader;
@@ -19,10 +21,6 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -86,10 +84,6 @@ public class Voter {
         final AtomicInteger count = new AtomicInteger(0);
         final int MAX_COUNT = max;
 
-        ExecutorService executorService = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<Runnable>(1),
-                new ThreadPoolExecutor.CallerRunsPolicy());
-
         while (count.intValue() < max) {
             if (count.intValue() > MAX_COUNT) {
                 return;
@@ -119,6 +113,16 @@ public class Voter {
                         System.err.println("Yuck!" + " Response Status: " + response.getStatusLine());
                         switchingProxy = true;
                         break;
+                }
+            } catch (ConnectTimeoutException e) {
+                switchingProxy = true;
+                System.out.println("Marking " + currentIP + ":" + currentPort + " as inactive");
+                ProxyGrabber.markProxyInactive(currentIP, currentPort);
+                System.out.println("Marked!");
+            } catch (HttpHostConnectException e) {
+                if (e.getMessage().contains("Connection refused")) {
+                    switchingProxy = true;
+                    ProxyGrabber.markProxyInactive(currentIP, currentPort);
                 }
             } catch (IOException e) {
                 e.printStackTrace();
@@ -156,7 +160,8 @@ public class Voter {
             System.out.println("Current Proxy being used is: " + currentIP + ":" + currentPort);
         }
         RequestConfig requestConfig = RequestConfig.custom()
-                .setProxy(new HttpHost(currentIP, currentPort)).build();
+                .setProxy(new HttpHost(currentIP, currentPort))
+                .setConnectTimeout(5000).build();
         context.setRequestConfig(requestConfig);
         return context;
     }
